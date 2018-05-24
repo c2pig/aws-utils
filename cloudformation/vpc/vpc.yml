@@ -1,0 +1,434 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Builds VPC And Subnets
+Parameters:
+  Environment:
+    Type: String
+    Description: Prod
+    AllowedValues:
+      - dev
+      - prod
+    Default: prod
+  Creator:
+    Type: String
+    Description: Your name
+    Default: admin@gdp.com
+    ConstraintDescription: >-
+      an alphanumeric string is expected, including underscores, hyphens and
+      spaces (min. length 3 chars)
+  Owner:
+    Type: String
+    Description: Owning Team
+    Default: admin@gdp.com
+    ConstraintDescription: >-
+      an alphanumeric string is expected, including underscores, hyphens and
+      spaces (min. length 3 chars)
+  ProjectTeam:
+    Type: String
+    Description: Required to trace billing
+    Default: Engineering
+  Stream:
+    Type: String
+    Description: Stream maintaining the VPC
+    Default: GDP
+  VPCName:
+    Type: String
+    Description: Name to use for the VPC
+    Default: EngineeringProdVPC
+  VPCCIDRBlock:
+    Type: String
+    Description: VPC CIDR Block
+  SubnetACIDRBlock:
+    Type: String
+    Description: CIDR Block for private subnet a
+  SubnetBCIDRBlock:
+    Type: String
+    Description: CIDR Block for private subnet b
+  SubnetCCIDRBlock:
+    Type: String
+    Description: CIDR Block for private subnet c
+  SubnetWebACIDRBlock:
+    Type: String
+    Description: CIDR Block for public subnet a
+  SubnetWebBCIDRBlock:
+    Type: String
+    Description: CIDR Block for public subnet b
+  SubnetWebCCIDRBlock:
+    Type: String
+    Description: CIDR Block for public subnet c
+  NumOfAZ:
+    Type: Number
+    Default: 2
+Conditions:
+  NeedThirdSubnet: !Equals [ !Ref NumOfAZ, 3 ]
+Resources:
+  EIPWebAZa:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  EIPWebAZb:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  EIPWebAZc:
+    Type: AWS::EC2::EIP
+    Condition: NeedThirdSubnet
+    Properties:
+      Domain: vpc
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref VPCCIDRBlock
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: !Ref VPCName
+  VPCGWAttachment:
+    DependsOn: [VPC, InternetGateway]
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+  SubnetAZA:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select 
+        - '0'
+        - !GetAZs ''
+      CidrBlock: !Ref SubnetACIDRBlock
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: SubnetAZA
+        - Key: Description
+          Value: Data Subnet in AZ a.
+      VpcId: !Ref VPC
+  SubnetAZB:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select 
+        - '1'
+        - !GetAZs ''
+      CidrBlock: !Ref SubnetBCIDRBlock
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: SubnetAZB
+        - Key: Description
+          Value: Data Subnet in AZ b.
+      VpcId: !Ref VPC
+  SubnetAZC:
+    Type: 'AWS::EC2::Subnet'
+    Condition: NeedThirdSubnet
+    Properties:
+      AvailabilityZone: !Select 
+        - '2'
+        - !GetAZs ''
+      CidrBlock: !Ref SubnetCCIDRBlock
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: SubnetAZC
+        - Key: Description
+          Value: Data Subnet in AZ c.
+      VpcId: !Ref VPC
+  SubnetWebAZa:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select 
+        - '0'
+        - !GetAZs ''
+      CidrBlock: !Ref SubnetWebACIDRBlock
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: SubnetWebAZa
+        - Key: Description
+          Value: DMZ Subnet in AZ a
+      VpcId: !Ref VPC
+  NATWebAZa:
+    DependsOn: [VPCGWAttachment, EIPWebAZa]
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - EIPWebAZa
+        - AllocationId
+      SubnetId: !Ref SubnetWebAZa
+  SubnetWebAZb:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select 
+        - '1'
+        - !GetAZs ''
+      CidrBlock: !Ref SubnetWebBCIDRBlock
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: SubnetWebAZb
+        - Key: Description
+          Value: DMZ Subnet in AZ b
+      VpcId: !Ref VPC
+  NATWebAZb:
+    DependsOn: [VPCGWAttachment, EIPWebAZb]
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - EIPWebAZb
+        - AllocationId
+      SubnetId: !Ref SubnetWebAZb
+  SubnetWebAZc:
+    Type: 'AWS::EC2::Subnet'
+    Condition: NeedThirdSubnet
+    Properties:
+      AvailabilityZone: !Select 
+        - '2'
+        - !GetAZs ''
+      CidrBlock: !Ref SubnetWebCCIDRBlock
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+        - Key: Name
+          Value: SubnetWebAZc
+        - Key: Description
+          Value: DMZ Subnet in AZ c
+      VpcId: !Ref VPC
+  NATWebAZc:
+    DependsOn: [VPCGWAttachment, EIPWebAZc]
+    Condition: NeedThirdSubnet
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - EIPWebAZc
+        - AllocationId
+      SubnetId: !Ref SubnetWebAZc
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Name
+          Value: InternetGateway
+        - Key: Description
+          Value: Internet Gateway
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+  ExternalRoutingTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Name
+          Value: ExternalRoutingTable
+        - Key: Description
+          Value: Routing Table attached to the Web Subnets
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+  ExternalRouteToInternet:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ExternalRoutingTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  ExternalAZaSubnetAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref ExternalRoutingTable
+      SubnetId: !Ref SubnetWebAZa
+  ExternalAZbSubnetAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref ExternalRoutingTable
+      SubnetId: !Ref SubnetWebAZb
+  ExternalAZcSubnetAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Condition: NeedThirdSubnet
+    Properties:
+      RouteTableId: !Ref ExternalRoutingTable
+      SubnetId: !Ref SubnetWebAZc
+  AZARouteToNAT:
+    Type: 'AWS::EC2::Route'
+    DependsOn: [NATWebAZa, AZARoutingTable]
+    Properties:
+      RouteTableId: !Ref AZARoutingTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATWebAZa
+  AZARoutingTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Name
+          Value: AZARoutingTable
+        - Key: Description
+          Value: Routing Table Setup for AZ A Subnets
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+  AZaSubnetAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref AZARoutingTable
+      SubnetId: !Ref SubnetAZA
+  AZBRoutingTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Name
+          Value: AZBRoutingTable
+        - Key: Description
+          Value: Routing Table Setup for AZ B Subnets
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+  AZbSubnetAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref AZBRoutingTable
+      SubnetId: !Ref SubnetAZB
+  AZBRouteToNAT:
+    Type: 'AWS::EC2::Route'
+    DependsOn: [NATWebAZb, AZBRoutingTable]
+    Properties:
+      RouteTableId: !Ref AZBRoutingTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATWebAZb
+  AZCRoutingTable:
+    Type: 'AWS::EC2::RouteTable'
+    Condition: NeedThirdSubnet
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Creator
+          Value: !Ref Creator
+        - Key: Name
+          Value: AZCRoutingTable
+        - Key: Description
+          Value: Routing Table Setup for AZ C Subnets
+        - Key: Project
+          Value: !Ref ProjectTeam
+        - Key: Stream
+          Value: !Ref Stream
+  AZcSubnetAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Condition: NeedThirdSubnet
+    Properties:
+      RouteTableId: !Ref AZCRoutingTable
+      SubnetId: !Ref SubnetAZC
+  AZCRouteToNAT:
+    Type: 'AWS::EC2::Route'
+    DependsOn: [NATWebAZc, AZCRoutingTable]
+    Condition: NeedThirdSubnet
+    Properties:
+      RouteTableId: !Ref AZCRoutingTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATWebAZc
+Outputs:
+  TemplateVersion:
+    Value: '1.5'
+    Description: The version of the SEEK environment template used to build this stack
+  VPCName:
+    Value: !Ref VPC
+    Description: VPC name
+  SubnetAZa:
+    Value: !Ref SubnetAZA
+    Description: Subnet for external web services in AZ a
+  SubnetAZb:
+    Value: !Ref SubnetAZB
+    Description: Subnet for external web services in AZ b
+  SubnetAZc:
+    Condition: NeedThirdSubnet
+    Value: !Ref SubnetAZC
+    Description: Subnet for external web services in AZ c
+  SubnetWebAZa:
+    Value: !Ref SubnetWebAZa
+    Description: Subnet for data and app services in AZ a
+  SubnetWebAZb:
+    Value: !Ref SubnetWebAZb
+    Description: Subnet for data and app services in AZ b
+  SubnetWebAZc:
+    Condition: NeedThirdSubnet
+    Value: !Ref SubnetWebAZc
+    Description: Subnet for data and app services in AZ c

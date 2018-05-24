@@ -1,0 +1,13 @@
+FROM circleci/node:latest
+
+USER root
+
+RUN \
+  apt-get update && \
+  apt-get install -y libfontconfig && \
+  apt-get install python-pip python-dev build-essential  && \
+  pip install --upgrade pip && \
+  pip install --upgrade virtualenv && \
+  pip install awscli && \
+  apt-get install -y ruby && \
+  gem install eb_deployer --no-ri --no-rdoc

@@ -1,0 +1,19 @@
+[ 
+  {
+    "ParameterKey":"AMI",
+    "ParameterValue": "ami-f864739e"
+  },
+  {
+    "ParameterKey": "EC2Key",
+    "ParameterValue": "qa-automation"
+  },
+  {
+    "ParameterKey": "StackTTL",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "AZ",
+    "ParameterValue": "ap-southeast-1a"
+  }
+
+]

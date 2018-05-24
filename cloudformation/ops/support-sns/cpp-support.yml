@@ -1,0 +1,47 @@
+## CPP Production Support SNS Topic
+## Notes: Stack is already being deployed to AWS under the stack name 
+## "cpp-support"
+
+## TODO: To add Slack integration into this topic.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CPP Support Contacts and SNS"
+Resources:
+  CPPStageSupport:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: CPP Stage Support  
+      TopicName: cpp-stage-s1-support
+      Subscription:
+        - Endpoint: gdp-cpp@seekasia.com
+          Protocol: email
+  CPPStageS2Support:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: CPP Stage S2 Support
+      TopicName: cpp-stage-s2-support
+      Subscription:
+        - Endpoint: gdp-cpp@seekasia.com
+          Protocol: email
+  CPPProdSupport:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: CPP Prod Support
+      TopicName: cpp-prod-s1-support
+      Subscription:
+        - Endpoint: gdp-cpp@seekasia.com
+          Protocol: email
+        - Endpoint: +60169125623
+          Protocol: sms
+        - Endpoint: +60163113435
+          Protocol: sms
+        - Endpoint: +60162380576
+          Protocol: sms
+  CPPProdS2Support:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: CPP Prod S2 Support
+      TopicName: cpp-prod-s2-support
+      Subscription:
+        - Endpoint: gdp-cpp@seekasia.com
+          Protocol: email

@@ -1,0 +1,109 @@
+##
+## Note: Please create the stack in us-east-1 region
+## for more information please refer to : http://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-monitor-view-status.html
+##
+Parameters:
+  Stream:
+    Type: String
+    Default: 'cpp'
+  Application:
+    Type: String
+    Default: 'application'
+  Port:
+    Type: String
+    Default: '80'
+  Protocol:
+    Type: String
+    Default: 'HTTP'
+  Path:
+    Type: String
+    Default: '/'
+  FQDN:
+    Type: String
+    Default: 'google.com'
+  Interval:
+    Type: String
+    Default: '30'
+  FailThreshold:
+    Type: String
+    Default: '2'
+  SlackWebhook:
+    Type: String
+    Default: '/services/T0D8K5TDX/B4ZC9CHF0/kwJq4Pv2i7Fyq0imSEoXMfqM'
+Description: "Service healthcheck"
+Resources:
+  AppHealthCheck: 
+    Type: "AWS::Route53::HealthCheck"
+    Properties: 
+      HealthCheckConfig: 
+        Port: !Ref 'Port'
+        Type: !Ref 'Protocol'
+        ResourcePath: !Ref 'Path'
+        FullyQualifiedDomainName: !Ref 'FQDN'
+        RequestInterval: !Ref 'Interval'
+        FailureThreshold: !Ref 'FailThreshold'
+      HealthCheckTags: 
+        - Key: 'Stream'
+          Value: !Ref 'Stream'
+        - Key: 'Application'
+          Value: !Ref 'Application'
+        - Key: 'Name'
+          Value: !Sub '${Stream}-${Application}'
+#  Notification:
+#    DependsOn: LambdaStack
+#    Type: 'AWS::SNS::Topic'
+#    Properties:
+#      TopicName: !Sub '${Stream}-${Application}-notification'
+#      Subscription:
+#        - Endpoint: '+60123129981'
+#          Protocol: 'SMS'
+#        - Endpoint: 'kbtan@seekasia.com'
+#          Protocol: 'EMAIL'
+#        - Endpoint: !GetAtt [ 'LambdaStack', 'Outputs.EC2LambdaArn' ]
+#          Protocol: 'LAMBDA'
+#        - Endpoint: !GetAtt [ 'LambdaStack', 'Outputs.SlackLambdaArn' ]
+#          Protocol: 'LAMBDA'
+  ServiceFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Stream}-${Application} ${Protocol}:${Path}:${Port} is fail' 
+      AlarmDescription: !Sub '${AWS::StackName}-${Stream}-${Application} ${Stream}-${Application}'
+      Namespace: AWS/Route53
+      MetricName: HealthCheckStatus
+      Dimensions:
+        - Name: HealthCheckId
+          Value : !Ref 'AppHealthCheck'
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !GetAtt [ 'LambdaStack', 'Outputs.NotificationArn' ]
+  ServiceOKAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Stream}-${Application} ${Protocol}:${Path}:${Port} is up'
+      AlarmDescription: !Sub '${AWS::StackName}-${Stream}-${Application} ${Stream}-${Application}'
+      Namespace: AWS/Route53
+      MetricName: HealthCheckStatus
+      Dimensions:
+        - Name: HealthCheckId
+          Value : !Ref 'AppHealthCheck'
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      OKActions:
+        - !GetAtt [ 'LambdaStack', 'Outputs.NotificationArn' ]
+  LambdaStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: https://s3.amazonaws.com/gdp-engineering/cf/operation/lambda.yml
+      Parameters:
+        InstanceRegion: 'ap-southeast-1'
+        InstanceId: '11111'
+        Stream: !Ref 'Stream'
+        Application: !Ref 'Application'
+        SlackWebhook: !Ref 'SlackWebhook'

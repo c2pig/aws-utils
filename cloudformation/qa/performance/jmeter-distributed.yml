@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  AZ:
+    Type: String
+    Default: 'ap-southeast-1a'
+  AMI:
+    Type: String
+    Default: 'ami-e2048281'
+  EC2Key:
+    Type: String
+    Default: 'qa-automation'
+  StackTTL:
+    Type: String
+    Default: '1'
+Resources:
+  PerfIGW:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-Performance-IGW'
+  PerfIGWA:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      InternetGatewayId: !Ref 'PerfIGW'
+      VpcId: !Ref 'PerfTestVPC'
+  RouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref 'PerfTestVPC'
+  InternetRoute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref 'RouteTable'
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref 'PerfIGW'
+  PerfTestVPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: "192.1.0.0/20"
+      EnableDnsHostnames: true
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-PerformanceTest-VPC'
+  PerfTestSubnetAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !Ref 'RouteTable'
+      SubnetId: !Ref 'PerfTestSubnet'
+  PerfTestSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Ref 'AZ'
+      CidrBlock: "192.1.0.0/24"
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-PerformanceTest-Subnet' 
+      VpcId: !Ref 'PerfTestVPC'
+  JMeterServer1:
+    DependsOn: ['PerfTestVPC', 'PerfTestSubnet']
+    Type: "AWS::EC2::Instance"
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /home/ubuntu/jmeter.properties:
+              content: |
+                server_port=24001
+                server.rmi.localhostname=127.0.0.1
+                server.rmi.localport=26001
+              mode: "000644"
+              owner: "ubuntu"
+              group: "ubuntu"
+    Properties:
+      SubnetId: !Ref 'PerfTestSubnet'
+      ImageId: !Ref 'AMI'
+      InstanceType: "t2.micro"
+      KeyName: !Ref 'EC2Key'
+      SecurityGroupIds: 
+      - !Ref 'JMeterRMISG'
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-JmeterServer-1'
+      UserData: 
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            /usr/local/bin/cfn-init -s ${AWS::StackId} -r JMeterServer1 --region=${AWS::Region} &> /home/ubuntu/init.log
+            cd /home/ubuntu && ./apache-jmeter-3.2/bin/jmeter-server -p /home/ubuntu/jmeter.properties -Djava.rmi.server.hostname=127.0.0.1
+  JMeterServer2:
+    DependsOn: ['PerfTestVPC', 'PerfTestSubnet']
+    Type: "AWS::EC2::Instance"
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /home/ubuntu/jmeter.properties:
+              content: |
+                server_port=24002
+                server.rmi.localhostname=127.0.0.1
+                server.rmi.localport=26002
+              mode: "000644"
+              owner: "ubuntu"
+              group: "ubuntu"
+    Properties:
+      SubnetId: !Ref 'PerfTestSubnet'
+      ImageId: !Ref 'AMI'
+      InstanceType: "t2.micro"
+      KeyName: !Ref 'EC2Key'
+      SecurityGroupIds:
+      - !Ref 'JMeterRMISG'
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-JmeterServer-2'
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            /usr/local/bin/cfn-init -s ${AWS::StackId} -r JMeterServer2 --region=${AWS::Region} &> /home/ubuntu/init.log
+            cd /home/ubuntu && ./apache-jmeter-3.2/bin/jmeter-server -p /home/ubuntu/jmeter.properties -Djava.rmi.server.hostname=127.0.0.1
+  JMeterMaster:
+    DependsOn: ['PerfTestVPC', 'PerfTestSubnet']
+    Type: "AWS::EC2::Instance"
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /home/ubuntu/jmeter.properties:
+              content: |
+                client.rmi.localport=1099
+              mode: "000644"
+              owner: "ubuntu"
+              group: "ubuntu"
+    Properties:
+      SubnetId: !Ref 'PerfTestSubnet'
+      ImageId: !Ref 'AMI'
+      InstanceType: "t2.micro"
+      KeyName: !Ref 'EC2Key'
+      SecurityGroupIds:
+      - !Ref 'JMeterRMISG'
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-JmeterMaster'
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            /usr/local/bin/cfn-init -s ${AWS::StackId} -r JMeterMaster --region=${AWS::Region} &> /home/ubuntu/init.log    
+            aws cloudformation delete-stack --stack-name ${AWS::StackName} | at now + ${StackTTL} hours
+  JMeterRMISG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Enable JMeter RMI Port"
+      Tags: 
+      - Key: 'Name'
+        Value: 'QA-Jmeter-SG'
+      SecurityGroupIngress:
+      - IpProtocol: 'tcp'
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: 'tcp'
+        FromPort: '24000'
+        ToPort: '24010'
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: 'tcp'
+        FromPort: '25000'
+        ToPort: '25000'
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: 'tcp'
+        FromPort: '26000'
+        ToPort: '26010'
+        CidrIp: '0.0.0.0/0'
+      VpcId: !Ref 'PerfTestVPC'
+Outputs:
+  Slave01:
+    Description: 'Slave IP'
+    Value: !GetAtt 'JMeterServer1.PrivateIp'
+  Slave02:
+    Description: 'Slave IP'
+    Value: !GetAtt 'JMeterServer2.PrivateIp'
+  Master:
+    Description: 'Master IP'
+    Value: !GetAtt 'JMeterMaster.PublicIp'

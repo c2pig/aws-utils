@@ -1,0 +1,4 @@
+*.zip
+*.pem
+
+cloudformation/qa/metrics/node_modules/

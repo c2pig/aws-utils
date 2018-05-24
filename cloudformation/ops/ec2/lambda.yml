@@ -1,0 +1,120 @@
+Parameters:
+  Stream:
+    Type: String
+    MinLength: 1
+  Application:
+    Type: String
+    MinLength: 1
+  InstanceId:
+    Type: String
+  InstanceRegion:
+    Type: String
+  SlackWebhook:
+    Type: String
+Resources:
+  Notification:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: !Sub '${Stream}-${Application}-notification'
+      Subscription:
+        - Endpoint: '+60123129981'
+          Protocol: 'SMS'
+        - Endpoint: 'kbtan@seekasia.com'
+          Protocol: 'EMAIL'
+        - Endpoint: !GetAtt 'EC2Lambda.Arn'
+          Protocol: 'LAMBDA'
+        - Endpoint: !GetAtt 'SlackLambda.Arn'
+          Protocol: 'LAMBDA'
+  EC2LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'EC2Lambda.Arn'
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref 'Notification'
+  SlackLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'SlackLambda.Arn'
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref 'Notification'
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+      - PolicyName: ServiceRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: CloudWatchLogsPolicy
+            Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            Resource: 'arn:aws:logs:*:*:*'
+          - Sid: EC2Policy
+            Effect: Allow
+            Action:
+            - 'ec2:*'
+            Resource: '*'
+  EC2Lambda:
+    DependsOn: 'LambdaExecutionRole'
+    Type: "AWS::Lambda::Function"
+    Description: 'ec2 reboot'
+    Properties:
+      Role: !GetAtt 'LambdaExecutionRole.Arn'
+      FunctionName: !Sub '${AWS::StackName}-ec2-reboot'
+      Handler: 'index.handler'
+      MemorySize: 128
+      Runtime: 'python2.7'
+      Environment:
+        Variables:
+          REGION: !Ref InstanceRegion
+          EC2_INSTANCE_ID: !Ref InstanceId
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+ 
+          region = os.environ['REGION']
+          instances = [os.environ['EC2_INSTANCE_ID']]
+          def handler(event, context):
+              ec2 = boto3.client('ec2', region_name=region)
+              try:
+                  response = ec2.reboot_instances(InstanceIds=instances, DryRun=False)
+                  print('Success', response)
+              except ClientError as e:
+                  print('Error', e)
+              print boto3
+              print 'restart instances: ' + str(instances)
+              print 'region: ' + str(region)
+              print ec2.describe_instances(InstanceIds=instances)
+  SlackLambda:
+    DependsOn: 'LambdaExecutionRole'
+    Type: "AWS::Lambda::Function"
+    Description: 'slack notification'
+    Properties:
+      Role: !GetAtt 'LambdaExecutionRole.Arn'
+      FunctionName: !Sub '${AWS::StackName}-slack-notif'
+      Handler: 'slack.handler'
+      MemorySize: 128
+      Runtime: 'nodejs6.10'
+      Environment:
+        Variables:
+          hookUri: !Ref SlackWebhook
+      Code: 
+        S3Bucket: "gdp-engineering"
+        S3Key: "cf/operation/slack.zip"
+Outputs:
+  NotificationArn:
+    Description: 'Notifcation Arn'
+    Value: !Ref 'Notification'

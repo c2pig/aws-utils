@@ -1,0 +1,10 @@
+[ 
+  {
+    "ParameterKey":"RepositoryName",
+    "ParameterValue": "cain-react"
+  },
+  {
+    "ParameterKey": "BranchName",
+    "ParameterValue": "master"
+  }
+]

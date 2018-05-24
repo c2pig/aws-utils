@@ -1,0 +1,413 @@
+Description: 'Pipeline'
+Parameters:
+  RepositoryName:
+    Type: String
+    Default: 'cain-react'
+  BranchName:
+    Type: String
+    Default: 'master'
+  EBServiceRole:
+    Type: String
+    Default: 'arn:aws:iam::773480812817:role/aws-elasticbeanstalk-service-role'
+    Description: This IAM role must have proper permissions
+Resources:
+  WebRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action: sts:AssumeRole
+  WebRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: WebRolePolicy
+      Roles:
+      - Ref: WebRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - cloudwatch:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - elasticbeanstalk:DescribeEnvironmentResources
+          - elasticbeanstalk:DescribeEnvironments
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - autoscaling:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - cloudformation:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - ecs:StartTask
+          - ecs:StopTask
+          - ecs:RegisterContainerInstance
+          - ecs:DeregisterContainerInstance
+          - ecs:DescribeContainerInstances
+          - ecs:DiscoverPollEndpoint
+          - ecs:Submit*
+          - ecs:Poll
+          - ecr:*
+          - iam:PassRole
+          - iam:ListRoles
+          - iam:ListInstanceProfiles
+          - iam:PassRole
+          - iam:ListRoles
+          - iam:ListInstanceProfiles
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action: s3:PutObject
+          Resource: arn:aws:s3:::elasticbeanstalk-*/resources/environments/logs/*
+        - Effect: Allow
+          Action: s3:GetObject
+          Resource: arn:aws:s3:::elasticbeanstalk-*/config/*
+        - Effect: Allow
+          Action:
+          - logs:*
+          Resource: arn:aws:logs:*:*:*
+  WebInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: WebRole
+  EBApp:
+    DependsOn: CloudFormationRole
+    Type: 'AWS::ElasticBeanstalk::Application'
+    Properties:
+      Description: 'EB Application'
+  EBTemplate:
+    DependsOn: [CloudFormationRole, WebRole]
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Description: Creating AWS Elastic Beanstalk configuration template
+    Properties:
+      ApplicationName: !Ref 'EBApp'
+      Description: AWS ElasticBeanstalk Sample Configuration Template
+      SolutionStackName: '64bit Amazon Linux 2016.09 v2.5.2 running Multi-container Docker 1.12.6 (Generic)'
+      OptionSettings:
+        - Namespace: 'aws:autoscaling:launchconfiguration'
+          OptionName: 'IamInstanceProfile'
+          Value: !GetAtt 'WebInstanceProfile.Arn'
+        - Namespace: 'aws:elasticbeanstalk:environment'
+          OptionName: 'EnvironmentType'
+          Value: 'LoadBalanced'
+#        - Namespace: 'aws:elasticbeanstalk:environment'
+#          OptionName: 'ServiceRole'
+#          Value: !Ref 'EBServiceRole'
+        - Namespace: 'aws:autoscaling:asg'
+          OptionName: 'MinSize'
+          Value: 1
+        - Namespace: 'aws:autoscaling:asg'
+          OptionName: 'MaxSize'
+          Value: 2
+#        - Namespace: 'aws:autoscaling:launchconfiguration'
+#          OptionName: 'InstanceType'
+#          Value: 't2.medium'
+#        - Namespace: 'aws:ec2:vpc'
+#          OptionName: 'VPCId'
+#          value: 'vpc-6968970c'
+#        - Namespace: 'aws:ec2:vpc'
+#          OptionName: 'Subnets'
+#          Value: 'subnet-bc6791cb'
+  EBEnv:
+    DependsOn: [CloudFormationRole, WebRole, EBApp, EBTemplate]
+    Type: 'AWS::ElasticBeanstalk::Environment'
+    Properties:
+      ApplicationName: !Ref EBApp
+      Description: 'EB Application'
+      TemplateName: !Ref 'EBTemplate'
+  ArtifactsRepository:
+    DependsOn: CloudFormationRole
+    DeletionPolicy: Retain
+    Type: 'AWS::ECR::Repository'
+    Properties: {}
+  ArtifactsBucket:
+    DependsOn: CloudFormationRole
+    DeletionPolicy: Retain
+    Type: 'AWS::S3::Bucket'
+  PipelineRole:
+    DependsOn: CloudFormationRole
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'codepipeline.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      ManagedPolicyArns:
+      - 'arn:aws:iam::aws:policy/AdministratorAccess'
+  CloudFormationRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'cloudformation.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      ManagedPolicyArns:
+      - 'arn:aws:iam::aws:policy/AdministratorAccess'
+  DockerImageRole:
+    DependsOn: CloudFormationRole
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'codebuild.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      Policies:
+      - PolicyName: ServiceRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: CloudWatchLogsPolicy
+            Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            Resource: '*'
+          - Sid: CodeCommitPolicy
+            Effect: Allow
+            Action: 'codecommit:GitPull'
+            Resource: '*'
+          - Sid: S3GetObjectPolicy
+            Effect: Allow
+            Action:
+            - 's3:GetObject'
+            - 's3:GetObjectVersion'
+            Resource: '*'
+          - Sid: S3PutObjectPolicy
+            Effect: 'Allow'
+            Action: 's3:PutObject'
+            Resource: '*'
+          - Sid: ECR
+            Effect: 'Allow'
+            Action: 'ecr:GetAuthorizationToken'
+            Resource: '*'
+          - Sid: ECRRepo
+            Effect: 'Allow'
+            Action:
+            - 'ecr:BatchCheckLayerAvailability'
+            - 'ecr:CompleteLayerUpload'
+            - 'ecr:InitiateLayerUpload'
+            - 'ecr:PutImage'
+            - 'ecr:UploadLayerPart'
+            Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ArtifactsRepository}'
+  CodeBuildRole:
+    DependsOn: CloudFormationRole
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'codebuild.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      Policies:
+      - PolicyName: ServiceRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: CloudWatchLogsPolicy
+            Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            Resource: '*'
+          - Sid: CodeCommitPolicy
+            Effect: Allow
+            Action: 'codecommit:GitPull'
+            Resource: '*'
+          - Sid: S3GetObjectPolicy
+            Effect: Allow
+            Action:
+            - 's3:GetObject'
+            - 's3:GetObjectVersion'
+            Resource: '*'
+          - Sid: S3PutObjectPolicy
+            Effect: 'Allow'
+            Action: 's3:PutObject'
+            Resource: '*'
+  AppProject:
+    DependsOn: CloudFormationRole
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: 'BUILD_GENERAL1_SMALL'
+        Image: 'aws/codebuild/nodejs:6.3.1'
+        Type: 'LINUX_CONTAINER'
+      Name: !Sub '${AWS::StackName}-app'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.1
+          phases:
+            build:
+              commands:
+              - 'chmod a+x ./scripts/*.sh'
+              - './scripts/build.sh'
+              - 'echo "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:}"'
+              - './scripts/package.sh ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:} 123456abcd'
+              - 'ls -l'
+          artifacts:
+            files:
+            - '**/*'
+      TimeoutInMinutes: 10
+  DockerImageProject:
+    DependsOn: CloudFormationRole
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: 'BUILD_GENERAL1_SMALL'
+        Image: 'aws/codebuild/docker:1.12.1'
+        Type: 'LINUX_CONTAINER'
+      Name: !Sub '${AWS::StackName}-image'
+      ServiceRole: !GetAtt 'DockerImageRole.Arn'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.1
+          phases:
+            build:
+              commands:
+              - 'docker build -f Dockerfile -t ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:} .'
+            post_build:
+              commands:
+              - 'eval $(aws ecr get-login) && docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:}'
+              - 'echo "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:}" > image.txt'
+              - 'echo "{\"image\": \"${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:}\"}" > image.json'
+              - 'cp -r package/* .'
+              - 'cp -r package/.ebextensions .'
+          artifacts:
+            files:
+            - '.ebextensions/**/*'
+            - 'Dockerrun.aws.json'
+            - 'web-stack.json'
+      TimeoutInMinutes: 10
+  Pipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactsBucket
+      Name: !Ref 'AWS::StackName'
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt 'PipelineRole.Arn'
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: FetchSource
+          ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Provider: CodeCommit
+            Version: 1
+          Configuration:
+            RepositoryName: !Ref RepositoryName
+            BranchName: !Ref BranchName
+          OutputArtifacts:
+          - Name: Source
+          RunOrder: 1
+      - Name: Pipeline
+        Actions:
+        - Name: DeployPipeline
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: CloudFormation
+            Version: 1
+          Configuration:
+            ActionMode: CREATE_UPDATE
+            Capabilities: CAPABILITY_IAM
+            RoleArn: !GetAtt 'CloudFormationRole.Arn'
+            StackName: !Ref 'AWS::StackName'
+            TemplatePath: 'Source::deploy/pipeline.yml'
+            ParameterOverrides: !Sub '{"RepositoryName": "${RepositoryName}", "BranchName": "${BranchName}"}'
+          InputArtifacts:
+          - Name: Source
+          RunOrder: 1
+      - Name: Build
+        Actions:
+        - Name: BuildAndTest
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: 1
+          Configuration:
+            ProjectName: !Ref AppProject
+          InputArtifacts:
+          - Name: Source
+          OutputArtifacts:
+          - Name: App
+          RunOrder: 1
+        - Name: BuildDockerImage
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: 1
+          Configuration:
+            ProjectName: !Ref DockerImageProject
+          InputArtifacts:
+          - Name: App
+          OutputArtifacts:
+          - Name: Image
+          RunOrder: 2
+      - Name: Development
+        Actions:
+        - Name: EBDeploy
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: ElasticBeanstalk
+            Version: 1
+          Configuration: 
+            ApplicationName: !Ref EBApp
+            EnvironmentName: !Ref EBEnv
+          InputArtifacts:
+           - Name: Image
+          RunOrder: 1
+Outputs:
+  InstanceProfile:
+    Description: Logical name of the IAM Instance Profile
+    Value:
+      Ref: WebInstanceProfile

@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  GithubUser:
+    Type: String
+    NoEcho: true
+    Default: seekinternational
+  GithubToken:
+    Type: String
+    NoEcho: true
+    Description: GitHub access token
+    Default: '<Provide your github access token>'
+  GithubRepo:
+    Type: String
+    Default: qa-robot-test
+  BranchName:
+    Type: String
+    Default: 'master'
+Resources:
+  ArtifactStore:
+    DeletionPolicy: Delete
+    Type: 'AWS::S3::Bucket'
+  ArtifactsRepository:
+    DeletionPolicy: Retain
+    Type: 'AWS::ECR::Repository'
+    Properties:
+      RepositoryName: gdp-qa-robot
+  PipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'codepipeline.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      ManagedPolicyArns:
+      - 'arn:aws:iam::aws:policy/AdministratorAccess'
+  CodeBuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'codebuild.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      Policies:
+      - PolicyName: ServiceRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: CloudWatchLogsPolicy
+            Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            Resource: '*'
+          - Sid: S3GetObjectPolicy
+            Effect: Allow
+            Action:
+            - 's3:GetObject'
+            - 's3:GetObjectVersion'
+            Resource: '*'
+          - Sid: S3PutObjectPolicy
+            Effect: 'Allow'
+            Action: 's3:PutObject'
+            Resource: '*'
+          - Sid: ECR
+            Effect: 'Allow'
+            Action: 'ecr:GetAuthorizationToken'
+            Resource: '*'
+          - Sid: ECRRepo
+            Effect: 'Allow'
+            Action:
+            - 'ecr:BatchCheckLayerAvailability'
+            - 'ecr:CompleteLayerUpload'
+            - 'ecr:InitiateLayerUpload'
+            - 'ecr:PutImage'
+            - 'ecr:UploadLayerPart'
+            Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ArtifactsRepository}'
+  DockerImageProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-BuildAndPush'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.1
+          phases:
+            build:
+              commands:
+              - 'echo ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:}'
+              - 'cd docker && docker build -t ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:} .'
+              - 'docker tag ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:} ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:latest'
+              - 'eval $(aws ecr get-login) && docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:${!CODEBUILD_BUILD_ID#*:}'
+              - 'eval $(aws ecr get-login) && docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ArtifactsRepository}:latest'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/docker:1.12.1
+        Type: LINUX_CONTAINER
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref ArtifactStore
+        Type: S3
+      RoleArn: !GetAtt 'PipelineRole.Arn'
+      RestartExecutionOnUpdate: false
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: FetchSource
+          ActionTypeId:
+            Category: Source
+            Owner: ThirdParty
+            Version: 1
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: QARepo
+          Configuration:
+            Owner: !Ref GithubUser
+            Repo: !Ref GithubRepo
+            OAuthToken: !Ref GithubToken
+            Branch: master
+          RunOrder: 1
+      - Name: ImagePublish
+        Actions:
+        - Name: Build
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: 1
+            Provider: CodeBuild
+          Configuration:
+            ProjectName: !Ref DockerImageProject
+          InputArtifacts:
+          - Name: QARepo
+          RunOrder: 1
